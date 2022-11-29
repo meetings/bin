@@ -1,0 +1,7 @@
+#!/bin/bash
+
+file=$1
+if [ ! -z $file ]; then
+    stat -c '%Y' "$file"
+fi
+

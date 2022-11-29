@@ -1,0 +1,22 @@
+#!/usr/bin/env perl
+
+my $grep = $ARGV[0];
+my $lines = ( $ARGV[1] || 1 ) * 1000;
+my $bb = $ARVG[2] || 0;
+my $aa = $ARGV[3] || 0;
+my $params = '-E';
+$params .= ' -B' . $bb if $bb;
+$params .= ' -A' . $aa if $aa;
+
+my @dcps = qw( dcp-1 dcp-2 );
+
+my @logs = ();
+for my $d ( @dcps ) {
+  print STDERR "fetching $d ...\n";
+  push @logs, split( "\n", `ssh $d "tail -n $lines /usr/local/dicole/logs/access-fcgi.log | grep $params '$grep'"` );
+}
+@logs = map { ($a) = $_ =~ /(\[.*?\])/; [ $a, $_ ] } @logs;
+@logs = sort { $a->[0] cmp $b->[0] } @logs;
+
+print join "\n", map { $_->[1] } @logs;
+print "\n";

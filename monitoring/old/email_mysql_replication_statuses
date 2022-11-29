@@ -1,0 +1,31 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use Email::Stuff;
+
+sub read_mysql_status {
+    my $server = shift;
+
+    my @lines = `mysql -u root -h $server -e 'show slave status\\G'`;
+
+    chomp for @lines;
+    s/\s*$// for @lines;
+    s/^\s*// for @lines;
+
+    return join "\n", @lines;
+}
+
+my @servers = qw/main-mysql-1 main-mysql-2/;
+
+my $status_1 = "main-mysql-1:\n" . read_mysql_status($servers[0]);
+my $status_2 = "main-mysql-2:\n" . read_mysql_status($servers[1]);
+
+print $status_1 . "\n";
+print $status_2 . "\n";
+
+Email::Stuff->from('check-mysql-ha@dicole')
+            ->to('antti@dicole.com')
+            ->subject('MySQL replication status')
+            ->text_body($status_1 . "\n\n" . $status_2)
+            ->send;

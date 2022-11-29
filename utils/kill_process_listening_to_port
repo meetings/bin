@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+my $port = $ARGV[0];
+die "You must give port number as first parameter\n" unless $port =~ /^\d+$/;
+
+my $l = `netstat -nlp| grep -E 'tcp\\s.*\\:$port\\s'`;
+my ( $pid ) = $l =~ /(\d+)\/sshd/;
+
+die "Could not find processes listening to $port\n" unless $pid;
+
+print "Killing sshd process $pid\n";
+system "kill", $pid;

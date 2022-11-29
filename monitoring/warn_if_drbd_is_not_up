@@ -1,0 +1,8 @@
+#!/usr/bin/env perl
+
+my $output = `cat /proc/drbd`;
+
+# The UpToDate/UpToDate match might give false positives, testing needed.
+warn $output if index( $output, 'cs:Connected ro:Primary/Secondary ds:UpToDate/UpToDate') == -1;
+
+exit 0;

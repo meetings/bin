@@ -1,0 +1,87 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use 5.010;
+
+use DateTime;
+use DateTime::Format::CLDR;
+use Path::Class               qw/dir file/;
+use Getopt::Long::Descriptive qw/describe_options/;
+use Log::Any::App             qw/$log/,
+    '-screen' => { pattern => '[%p %d %M] %m%n' };
+
+use FindBin qw/$Bin/;
+use lib "$Bin/lib";
+
+use Dicole::Backup::Util;
+
+# Configuration {{{
+
+my ($opt, $usage) = describe_options(
+    '%c %o <signature> <input file>',
+
+    [ 'host=s' => "the remote host to save the delta file to", { required => 1 } ],
+
+    [ 'target-file=s' => "full path to the output file to be created on the remote host", { required => 1} ],
+
+    [],
+
+    [ 'dry-run' => "only show what I would do, useful for sanity checking the parameters" ],
+    [ 'help'    => "show help and exit"                                                   ],
+    [ 'verbose' => "show more information while running"                                  ],
+    [ 'debug'   => "show even more information while running", { implies => 'verbose' }   ],
+);
+
+print($usage->text), exit if $opt->help;
+
+sub opt { $opt }
+
+@ARGV == 2 or die $usage->text;
+
+my ($signature, $file) = map { file($_) } @ARGV;
+
+create_delta($signature, $file);
+
+sub create_delta {
+    my ($signature, $file) = @_;
+
+    $log->info("Backing up file: " . $file->basename);
+
+    run delta($signature, $file);
+}
+
+sub delta {
+    my ($signature, $file) = @_;
+
+    delta_generator($signature, $file), '|', delta_writer($opt->target_file)
+}
+
+sub delta_generator {
+    my ($signature, $file) = @_;
+
+    if ($opt->verbose) {
+        [ pv => $file, '-c', '-N' => 'Read input' ],
+            '|',
+            [ rdiff => delta => '--', $signature, '-', '-' ]
+    } else {
+        [ rdiff => delta => '--', $signature, $file, '-' ]
+    }
+}
+
+sub delta_writer {
+    my ($target_file) = @_;
+
+    _ssh_writer($target_file)
+}
+
+sub _ssh_writer {
+    my ($target_file) = @_;
+
+    if ($opt->verbose) {
+        [ pv => '-c', '-N' => 'SSH write' ],
+            '|', [ ssh => $opt->host => "cat > '$target_file'" ]
+    } else {
+        [ ssh => $opt->host => "cat > '$target_file'" ]
+    }
+}

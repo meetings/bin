@@ -1,0 +1,5 @@
+#!/usr/bin/env perl
+
+$df=`df;df -i`;
+
+print STDERR $df if $df =~ m#/dev.*\s+(10|9)\d\%#m;

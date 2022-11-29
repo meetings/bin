@@ -1,0 +1,24 @@
+#!/bin/sh
+
+if [ ! $# -ge 4 ]; then
+    echo -n "Usage: $0 <local signature directory> <remote host> <remote backup directory> <file> [<file> ...]"
+    exit 1
+fi
+
+backup_tools_dir=`perl -MCwd=abs_path -E'say abs_path(shift)'`
+
+local_signature_directory="$1"
+remote_host="$2"
+remote_full_backup_directory="$3"
+shift 3
+input_files="$@"
+
+for input_file in $input_files; do
+    timestamped_full_backup_file="$remote_full_backup_directory/`basename "$input_file"`-backup-`date +%Y-%m-%dT%H-%M-%S`"
+    temporary_local_full_backup="/tmp/`basename "$timestamped_full_backup_file"`"
+
+    dd bs=4m if="$input_file" of="$temporary_local_full_backup" &&
+    scp "$temporary_local_full_backup" "$remote_host:$timestamped_full_backup_file" &&
+    "$backup_tools_dir"/create_rdiff_signature "$temporary_local_full_backup" "$local_signature_directory" &&
+    rm "$temporary_local_full_backup"
+done

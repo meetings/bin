@@ -1,0 +1,45 @@
+#!/usr/bin/env perl
+
+use warnings;
+use strict;
+
+my %config = (
+    mysql => {
+        host => '127.0.0.1',
+        port => 20087,
+    },
+    backup => {
+        directory => '/mnt/backups/mysql'
+    },
+);
+
+backup();
+
+sub backup {
+    my $date = `/bin/date -u '+%F-%H.%M.%S'`; chomp $date;
+
+    my $mysql = [
+        mysqldump =>
+            -h => $config{mysql}{host},
+            -P => $config{mysql}{port},
+            '--all-databases',
+            '--master-data'
+    ];
+
+    my $to_file = "$config{backup}{directory}/$date.db";
+
+    my @escaped = map { _escape_bash($_) } @$mysql;
+    my $command = "'" . join( "' '", @escaped ) . "'";
+    my $target = _escape_bash( $to_file );
+
+    `$command | pv -q -L 2m > $target`;
+
+    system( gzip => $to_file );
+}
+
+sub _escape_bash {
+    my ( $original_string ) = @_;
+    my $string = $original_string;
+    $string =~ s/'/'"'"'/g;
+    return $string;
+}

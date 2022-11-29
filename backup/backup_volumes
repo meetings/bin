@@ -1,0 +1,25 @@
+#!/bin/bash
+if [ ! $# -ge 4 ]; then
+    echo -n "Usage: $0 <remote host> <remote backup directory> <local signature directory> <volume> [ <volume> .. ]"
+    exit 1
+fi
+
+remote_host=$1
+remote_dir=$2
+signature_dir=$3
+
+shift 3
+
+bin_backup_dir=$(perl -MCwd=abs_path -E 'abs_path(shift) =~/(.*backup)/; say $1' $(dirname "$0"))
+
+for input_volume in "$@"; do
+    latest_signature_file=$("$bin_backup_dir"/utils/print_latest_signature_file "$input_volume" "$signature_dir")
+    latest_epoch=$("$bin_backup_dir"/utils/print_file_modification_epoch "$latest_signature_file")
+    if [ $(perl -E 'say(time-shift(@ARGV) > 24*60*60*6.5 ? 1 : 0 )' "$latest_epoch") == "1" ]; then
+        "$bin_backup_dir"/create_full_remote_backup_and_local_signature_for_volume \
+            "$input_volume" "$remote_host" "$remote_dir" "$signature_dir"
+    else
+        "$bin_backup_dir"/create_rdiff_remote_backup_for_volume \
+            "$input_volume" "$remote_host" "$remote_dir" "$signature_dir"
+    fi
+done

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+input_volume=$1
+local_signature_directory=$2
+
+volume_name=`basename "$input_volume"`
+
+mkdir -p "$local_signature_directory/$volume_name/"
+latest_file=$(ls -rc "$local_signature_directory/$volume_name/" | tail -n1)
+if [ ! -z $latest_file ]; then
+    echo "$local_signature_directory/$volume_name/$latest_file"
+fi
+

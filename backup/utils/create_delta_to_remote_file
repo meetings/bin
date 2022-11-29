@@ -1,0 +1,25 @@
+#!/bin/bash
+input_volume=$1
+remote_host=$2
+remote_full_backup_directory=$3
+signature_dir=$4
+date=$5
+
+volume_name=`basename "$input_volume"`
+
+snapshot_name=`basename $input_volume`-backup-snap
+snapshot_path=`dirname $input_volume`/$snapshot_name
+
+bin_backup_dir=$(perl -MCwd=abs_path -E 'abs_path(shift) =~/(.*backup)/; say $1' $(dirname "$0"))
+
+signature_file=$("$bin_backup_dir"/utils/print_latest_signature_file "$input_volume" "$signature_dir")
+signature_name=`basename $signature_file`
+backup_name=$signature_name-delta-$date
+remote_vm_directory=$remote_full_backup_directory/$volume_name
+timestamped_full_backup_file=$remote_vm_directory/$backup_name
+timestamped_full_backup_file_temp=$timestamped_full_backup_file.part
+
+ssh $remote_host "mkdir -p '$remote_vm_directory'" &&
+rdiff delta -- "$signature_file" "$snapshot_path" - | ssh -C -c arcfour $remote_host "cat > '$timestamped_full_backup_file_temp' && \
+	 mv '$timestamped_full_backup_file_temp' '$timestamped_full_backup_file'"
+

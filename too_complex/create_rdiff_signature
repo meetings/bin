@@ -1,0 +1,90 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use 5.010;
+
+use DateTime;
+use DateTime::Format::CLDR;
+use Path::Class               qw/dir file/;
+use Getopt::Long::Descriptive qw/describe_options/;
+use Log::Any::App             qw/$log/,
+    '-screen' => { pattern => '[%p %d %M] %m%n' };
+
+use FindBin qw/$Bin/;
+use lib "$Bin/lib";
+
+use Dicole::Backup::Util qw/run/;
+
+# Configuration {{{
+
+my ($opt, $usage) = describe_options(
+    '%c %o <file> <signature>',
+
+    [],
+
+    [ 'dry-run' => "only show what I would do, useful for sanity checking the parameters" ],
+    [ 'help'    => "show help and exit"                                                   ],
+    [ 'verbose' => "show more information while running"                                  ],
+    [ 'debug'   => "show even more information while running", { implies => 'verbose' }   ],
+);
+
+print($usage->text), exit if $opt->help;
+
+sub opt { $opt }
+
+# }}}
+
+# Main program {{{
+
+sub run;
+
+@ARGV == 2 or die $usage->text;
+
+my ($file, $signature) = map { file($_) } @ARGV;
+
+create_signature($file, $signature);
+
+# }}}
+
+# Subroutines {{{
+
+sub create_signature {
+    my ($file, $signature) = @_;
+
+    $log->info("Generating signature for " . $file->basename);
+
+    run signature($file, $signature);
+}
+
+sub signature {
+    my ($file, $signature) = @_;
+
+    signature_generator($file, $signature), '|', signature_writer($signature)
+}
+
+sub signature_generator {
+    my ($file) = @_;
+
+    if ($opt->verbose) {
+        [ pv => $file,
+            '-c',
+            '-N' => 'Basis read'
+        ] , '|', [ rdiff => signature => '--', '-', '-' ]
+    } else {
+        [ rdiff => signature => $file => '-' ]
+    }
+}
+
+sub signature_writer {
+    my ($signature) = @_;
+
+    [ $opt->verbose
+        ? (pv => '-c', '-N' => 'Signature write')
+        : 'cat'
+    ], '>', "$signature"
+}
+
+# }}}
+
+# vi: ft=perl et ts=4 sw=4 fdm=marker

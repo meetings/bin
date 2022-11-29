@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# This is meant to be used with the 'read_newest_mysql_dump_to_stdout'
+# script. Database dump is fetched and written to local MySQL instance.
+
+# Machine which hosts backups. Expected to be a dom0 and thus connection
+# is made directly.
+#
+BACKUP_SRC=myssy.dicole.com
+
+# Portforward service id (port), through which Mogile host is accessible.
+#
+MOGILE_SRV=20116
+
+# Connect to backup host, read dump, extract it and write to local db.
+#
+ssh $BACKUP_SRC /usr/local/mbin/staging/read_newest_mysql_dump_to_stdout | zcat | mysql
+
+# Connect to Mogile host, upgrade database format and reconfigure MogileFS.
+#
+ssh -p $MOGILE_SRV servers.dicole.com /usr/local/mbin/staging/upgrade_and_reconfigure_mogilefs_table

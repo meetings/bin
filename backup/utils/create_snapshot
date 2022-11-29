@@ -1,0 +1,12 @@
+#!/bin/bash
+input_volume=$1
+LVM_SNAPSHOT_SIZE=2G
+
+volume_name=`basename "$input_volume"`
+snapshot_name=`basename $input_volume`-backup-snap
+snapshot_path=`dirname $input_volume`/$snapshot_name
+if [ -a $snapshot_path ]; then
+    lvremove -f "$snapshot_path"
+fi
+lvcreate --quiet --snapshot --name "$snapshot_name" --size $LVM_SNAPSHOT_SIZE "$input_volume"
+

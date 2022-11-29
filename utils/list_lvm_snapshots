@@ -1,0 +1,18 @@
+#!/usr/bin/perl -w
+use strict;
+
+open(LVDISPLAY, "lvdisplay |");
+while (<LVDISPLAY>) {
+  chomp;
+  my ($volume_dev, $volume_name, $snapshot_dev, $snapshot_name);
+  if ($_ =~ /^\s+LV Name\s+\/dev(\S+)-disk$/) {
+    $volume_dev = "/dev$1-disk";
+#    print "VOLUME: $volume_dev\n";
+    $volume_name = $volume_dev;
+    $volume_name =~ s/.*\///;
+    $snapshot_dev = "$volume_dev-snapshot";
+    $snapshot_name = "$volume_name-snapshot";
+    print "$volume_dev - $volume_name - $snapshot_dev - $snapshot_name\n";
+  }
+}
+close(LVDISPLAY);

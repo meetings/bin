@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# Used by the 'fetch_remote_mysql_dump_and_write_local' script. This
+# script upgrades the mogilefs database schema and reconfigures Mogile.
+
+_mysql() {
+    mysql -e "${*}" -h 127.0.0.1 mogilefs
+}
+
+mogdbsetup --yes --dbhost=127.0.0.1 --dbname=mogilefs --dbuser=mogile
+
+_mysql "UPDATE host SET hostip='127.0.0.4' WHERE hostip='127.0.0.2'"
+_mysql "UPDATE host SET hostip='127.0.0.5' WHERE hostip='127.0.0.3'"
+_mysql "FLUSH PRIVILEGES"

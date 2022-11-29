@@ -1,0 +1,53 @@
+#!/bin/sh
+
+if [ ! $# -ge 4 ]; then
+    echo -n "Usage: $0 <local signature directory> <remote host> <remote backup directory> <volume> [<volume> ...]"
+    exit 1
+fi
+
+[ $DEBUG ] && set -x
+
+local_signature_directory=$1
+remote_host=$2
+remote_full_backup_directory=$3
+shift 3
+
+backup_tools_dir=$(perl -MCwd=abs_path -E'say abs_path(shift)' $(dirname "$0"))
+
+LVM_SNAPSHOT_SIZE=2G
+
+cleanup() {
+    trap - INT
+    lvremove --quiet -f "$snapshot_path" 2>&- >&-
+    trap stop INT
+}
+
+stop() {
+    cleanup
+    exit 1
+}
+
+trap stop INT
+
+for input_volume in "$@"; do
+    volume_name=`basename "$input_volume"`
+    snapshot_name=`basename $input_volume`-backup-snap
+    snapshot_path=`dirname $input_volume`/$snapshot_name
+    remote_vm_directory=$remote_full_backup_directory/$volume_name
+    backup_name=$volume_name-snap-`date +%Y-%m-%dT%H-%M-%S`
+    timestamped_full_backup_file=$remote_vm_directory/$backup_name
+    timestamped_full_backup_file_temp=$timestamped_full_backup_file.part
+
+    lvcreate --quiet --snapshot --name "$snapshot_name" --size $LVM_SNAPSHOT_SIZE "$input_volume" >/dev/null &&
+    ssh $remote_host "mkdir -p '$remote_vm_directory'" &&
+    ssh $remote_host "cat > '$timestamped_full_backup_file_temp'   \
+                        && mv '$timestamped_full_backup_file_temp' \
+                              '$timestamped_full_backup_file'"     \
+        < "$snapshot_path" &&
+    ssh $remote_host "gzip '$timestamped_full_backup_file'" && 
+    mkdir -p "$local_signature_directory/$volume_name" &&
+    "$backup_tools_dir"/create_rdiff_signature "$snapshot_path" "$local_signature_directory/$volume_name/$backup_name.sig" &&
+    "$backup_tools_dir"/remove_old_signatures "$local_signature_directory" "$input_volume"
+
+    cleanup
+done

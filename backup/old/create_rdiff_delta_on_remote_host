@@ -1,0 +1,33 @@
+#!/bin/sh
+
+DELTA_TIMEOUT=600s
+
+if [ ! $# -ge 4 ]; then
+    echo "Usage: $0 <signature directory> <host> <remote directory> <input file> [<input file> ...]"
+    exit 1
+fi
+
+[ $DEBUG ] && set -x
+
+signature_dir=$1
+host=$2
+remote_directory=$3
+shift 3
+
+hash time >/dev/null && TIMER=time
+
+for input_file in "$@"; do
+    input_name=`basename "$input_file"`
+
+    for signature in $signature_dir/$input_name/*.sig; do
+        delta_name=`basename "$signature" .sig`.delta.`date +%Y-%m-%dT%H-%M-%S`
+        timestamped_output_file="$remote_directory/$input_name/$delta_name"
+        timestamped_output_file_temp="$timestamped_output_file.part"
+
+        ($TIMER timeout $DELTA_TIMEOUT rdiff delta -- "$signature" "$input_file" - \
+            || echo >&2 "Timeout ($DELTA_TIMEOUT): rdiff delta '$signature' '$input_file'") \
+            | ssh $host "cat > '$timestamped_output_file_temp' && \
+                         mv '$timestamped_output_file_temp' '$timestamped_output_file' && \
+                         gzip '$timestamped_output_file'"
+    done
+done

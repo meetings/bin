@@ -1,0 +1,2 @@
+#!/bin/sh
+netstat -n --inet | tail -n +3 | awk '{print $4}' | cut -d: -f2 | sort -un

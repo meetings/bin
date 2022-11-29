@@ -1,0 +1,3 @@
+warn if something odd in mdstat
+warn if too old latest backups
+warn if dcp can't connect to mogile trackers

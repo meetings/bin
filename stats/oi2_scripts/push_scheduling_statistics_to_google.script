@@ -1,0 +1,59 @@
+#!/bin/perl
+
+# OPENINTERACT2=/usr/local/dcp/ oi2_manage dicole_script --script=/home/amv/push_scheduling_statistics_to_google.script 
+
+my $gapier_url = 'https://meetings-gapier.appspot.com/add_or_update_row';
+my $token = 'swipetomeetstats:vonaoxhnxwrgbtid';
+
+sub execute {
+    my ( $s ) = @_;
+
+    my $self = CTX->lookup_action('meetings_api');
+    my $ss = CTX->lookup_object('meetings_scheduling')->fetch_group({
+        where => 'created_date > ?',
+        value => [ time - 3*31*24*60*60 ],
+        order => 'created_date asc'
+    });
+
+    my $days = {};
+
+    my $dt = Dicole::Utils::Date->epoch_to_datetime( new DateTime( year => 2015, hour => 12, time_zone => 'Europe/Helsinki' )->epoch );
+    while ( $dt->epoch < time ) {
+        my $stamp = $dt->ymd;
+        $days->{$stamp} ||= { day => $stamp, total => 0, success => 0, failure => 0, ongoing => 0, 'Ongoing IDs' => '', 'Ongoing inviters' => '' };
+        $dt->add( days => 1 );
+    }
+
+    for my $s ( @$ss ) {
+        my $m = $self->_ensure_meeting_object( $s->meeting_id );
+        my $d = Dicole::Utils::Date->epoch_to_datetime( $s->created_date );
+        my $stamp = $d->ymd;
+
+        $days->{$stamp}->{total}++;
+
+        if ( $s->completed_date ) {
+            $days->{$stamp}->{success}++;
+        }
+        elsif ( $s->removed_date || $s->cancelled_date || $self->_get_note( failed_epoch => $s ) || $m->removed_date || $m->begin_date ) {
+            $days->{$stamp}->{failure}++;
+        }
+        else {
+            $days->{$stamp}->{ongoing}++;
+            $days->{$stamp}->{'Ongoing IDs'} .= ( $days->{$stamp}->{'Ongoing IDs'} ? ', ' : '' ) . $s->id;
+
+            my $inviter = Dicole::Utils::User->ensure_object( $s->creator_id );
+            $days->{$stamp}->{'Ongoing inviters'} .= ( $days->{$stamp}->{'Ongoing inviters'} ? ', ' : '' ) . $inviter->email;
+        }
+    }
+
+    for my $day ( reverse sort keys %$days ) {
+        my $data = $days->{$day};
+        my $match_json = Dicole::Utils::JSON->encode( { day => delete $data->{day} } );
+        my $set_json = Dicole::Utils::JSON->encode( $data );
+        my $cmd = "curl $gapier_url -s --data-urlencode 'worksheet_token=$token' --data-urlencode 'match_json=$match_json' --data-urlencode 'set_json=$set_json'";
+        print "$cmd" . "\n";
+        print `$cmd` . "\n";
+    }
+}
+
+1;

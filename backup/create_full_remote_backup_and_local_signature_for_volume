@@ -1,0 +1,35 @@
+#!/bin/bash
+if [ ! $# -ge 4 ]; then
+    echo -n "Usage: $0 <volume> <remote host> <remote backup directory> <local signature directory>"
+    exit 1
+fi
+
+input_volume=$1
+remote_host=$2
+remote_dir=$3
+signature_dir=$4
+
+date=`date +%Y-%m-%dT%H-%M-%S`
+bin_backup_dir=$(perl -MCwd=abs_path -E 'abs_path(shift) =~/(.*backup)/; say $1' $(dirname "$0"))
+
+[ $DEBUG ] && set -x
+
+cleanup() {
+    trap - INT
+    "$bin_backup_dir"/utils/clean_snapshot "$input_volume"
+    trap stop INT
+}
+
+stop() {
+    cleanup
+    exit 1
+}
+
+trap stop INT
+
+"$bin_backup_dir"/utils/create_snapshot "$input_volume" >/dev/null &&
+"$bin_backup_dir"/utils/copy_snapshot_to_remote_file "$input_volume" "$remote_host" "$remote_dir" "$date" &&
+"$bin_backup_dir"/utils/create_signature "$input_volume" "$date" "$signature_dir" &&
+cleanup
+
+"$bin_backup_dir"/utils/gzip_remote_snapshot_file "$input_volume" "$remote_host" "$remote_dir" "$date"

@@ -1,0 +1,56 @@
+#!/bin/sh
+
+# SYNOPSIS
+# ========
+#
+# Do a rolling deployment of staging to all machines listed in
+# /root/dcp_nodelist.dat.
+#
+# DEPENDENCIES
+# ============
+#
+# * perlbal-cmd
+#   - perlbal management interface on port 16000
+# * xen-clone-host
+#   - xen-tools: xen-create-image, xen-delete-image
+#
+# TODO
+# ====
+# * We are assuming /etc/dnsmasq.conf.d/dicole.conf and /root/dcp/nodelist.dat
+#   are in sync. Might want to check they are.
+
+set -e
+
+disk() { 
+    echo "/dev/vg0/$1-disk" 
+}
+
+swap() {
+    echo "/dev/vg0/$1-swap"
+}
+
+staging="dcp-staging"
+temp="$staging-temp"
+targets=`cat ~/dcp_nodelist.dat`
+
+xen-clone-host $staging $temp
+
+while read target
+do
+    name=`echo $target | cut -f 1 -d' '`
+    mac=`echo $target | cut -f 2 -d' '`
+    ip=`echo $target | cut -f 3 -d' '`
+
+    perlbal-cmd pool dcp remove $ip
+
+    xm shutdown $name
+    xen-delete-image --lvm=vg0 $name
+
+    xen-clone-host $temp $name --mac=$mac
+    xm create $name.cfg
+
+    perlbal-cmd pool dcp add $ip
+done < dcp_nodelist.dat
+
+lvremove `disk $temp`
+lvremove `swap $temp`

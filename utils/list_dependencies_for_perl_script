@@ -1,0 +1,44 @@
+#!/usr/bin/env perl
+
+use warnings;
+use strict;
+use 5.010;
+
+eval {
+    require Module::ScanDeps;
+    require Path::Class;
+    Module::ScanDeps->import;
+    Path::Class->import(qw/dir file/);
+};
+
+if ($@) {
+    warn "Installing required modules\n";
+    system cpanm => qw/Module::ScanDeps Path::Class/;
+    exec $0, @ARGV;
+};
+
+use Config;
+
+my $modules = scan_deps(files => \@ARGV);
+
+my %seen;
+
+while (my ($used, $module) = each %$modules) {
+    my $name = _name($used);
+    my $path = $module->{file};
+    next if
+        dir($Config::Config{privlibexp})->subsumes($path) or
+        dir(".")->subsumes($path) or
+        $module->{type} eq 'data';
+    $seen{$name}++;
+}
+
+say for keys %seen;
+
+sub _name {
+    my $str = shift;
+    $str =~ s!/!::!g;
+    $str =~ s!.pm$!!i;
+    $str =~ s!^auto::(.+)::.*!$1!;
+    return $str;
+}

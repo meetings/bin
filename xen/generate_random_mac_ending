@@ -1,0 +1,5 @@
+#!/usr/bin/perl
+my @chars = ("A".."F","0".."9");
+my @codes = @chars[ map { rand @chars } ( 1 .. 6 ) ];
+print ':', shift @codes, shift @codes while @codes;
+

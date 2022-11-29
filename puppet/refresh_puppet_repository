@@ -1,0 +1,10 @@
+#!/usr/bin/perl
+
+if (`whoami` =~ /^root/ ) {
+  print "Content-Type: text/plain\r\n\r\n";
+  `chmod 600 /root/bin/puppet/puppet-pull-key`;
+  print `cd /etc/puppet && git pull autopull master`;
+}
+else {
+  exec "sudo", "/root/bin/puppet/refresh_puppet_repository";
+}

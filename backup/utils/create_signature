@@ -1,0 +1,14 @@
+#!/bin/bash
+input_volume=$1
+date=$2
+local_signature_directory=$3
+
+volume_name=`basename "$input_volume"`
+
+snapshot_name=`basename $input_volume`-backup-snap
+snapshot_path=`dirname $input_volume`/$snapshot_name
+backup_name=$volume_name-snap-$date
+signature_file=$local_signature_directory/$volume_name/$backup_name.sig
+
+mkdir -p `dirname $signature_file` &&
+rdiff signature $snapshot_path $signature_file

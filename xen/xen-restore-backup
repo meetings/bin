@@ -1,0 +1,125 @@
+#!/usr/bin/env perl
+
+use warnings;
+use strict;
+
+use Getopt::Long;
+use Cwd;
+use Term::ANSIColor qw(colored);
+
+sub run;
+sub usage;
+sub info;
+
+GetOptions(
+    'ip:s'       => \my $ip,
+    'mac:s'      => \my $mac,
+    'memory:s'   => \my $memory,
+    'name:s'     => \my $name,
+    'lvm-size:s' => \my $lvm_size,
+    'lvm'        => \my $lvm,
+    'dry-run'    => \my $dry,
+) or usage;
+
+@ARGV == 3 or usage;
+
+my ($conf, $image, $vg) = @ARGV;
+
+my ($original_name) = $conf && $conf =~ /^(.+)\.cfg$/;
+
+$name ||= $original_name;
+
+chomp(my $hostname = `hostname`);
+
+my $new_conf = "/etc/xen/$name.$hostname.cfg";
+
+if ($lvm) {
+    run lvcreate =>
+        '--name' => "$name-swap",
+        '--size' => '128M',
+        $vg;
+
+        run mkswap => "/dev/$vg/$name-swap";
+}
+
+my $original_image_file = $image;
+
+if ($image =~ /\.gz$/) {
+    $image =~ s/\.gz$//;
+    run "pv $image.gz | gunzip > $image" unless -e $image;
+}
+
+if ($lvm) {
+    my $image_file = $dry ? $original_image_file : $image;
+
+    my $human_readable_image_size = $lvm_size 
+        || (int((-s $image_file) / 1024) + 1) . "K";
+
+    run lvcreate => 
+        '--name' => "$name-disk",
+        '--size' => $human_readable_image_size,
+        $vg;
+
+    run "pv $image | dd bs=64k of=/dev/$vg/$name-disk";
+
+    run e2fsck => -f => "/dev/$vg/$name-disk";
+    run resize2fs => "/dev/$vg/$name-disk";
+}
+
+open my $in,  '<', $conf     or die $!;
+open my $out, '>', $new_conf or die $!;
+
+my $cwd = cwd;
+
+while (<$in>) {
+    print $out $_ and next if /^\s*#/;
+
+    my $old = $_;
+
+    my $t = s"phy:/dev/(?:.+?)/"phy:/dev/$vg/"g;
+
+    if ($lvm) {
+        $t += s"phy:/dev/$vg/(?:.+?)-(swap|disk)"phy:/dev/$vg/$name-$1";
+    } else {
+        $t += s"phy:/dev/(?:.+?)/(?:.+?)-disk,(xv|h|s)da(.),w"file:$cwd/$image,xvda$1,w";
+    }
+
+    s/^memory\s.*/memory = "$memory"/ if $memory;
+    s/^name\s.*/name = "$name"/ if $name;
+    s/mac=(..\:){5}../mac=$mac/ if $mac;
+    # TODO: ip
+
+    my $temp = $_;
+
+    s/^\s*//, chomp for $temp, $old;
+
+    info "   $old\n=> $temp\n" if $t;
+
+    print $out $_;
+}
+
+close $out;
+close $in;
+
+#run xm => create => $new_conf;
+#
+#exec xm => console => $name unless $dry;
+
+sub run {
+    my (@command) = @_;
+
+    info "@command";
+
+    system @command unless $dry;
+}
+
+sub usage {
+    die "Usage: $0 [--name=new_name] [--ip=ip] [--mac=mac] [--memory=512] [--dry-run] [--lvm] [--lvm-size=20G] domain.cfg image.ext3 volume_group\n";
+}
+
+sub info {
+    my (@args) = @_;
+
+    warn colored("@args", 'bold'), "\n";
+}
+

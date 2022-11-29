@@ -1,0 +1,11 @@
+# GNU screen configuration for check script
+# Usage (at boot): screen -d -m -c thisfile
+
+vbell off
+utf8 on on
+defutf8 on
+nonblock on
+defscrollback 2048
+sessionname ilmari
+
+screen -t check 0 /usr/local/mbin/check/check

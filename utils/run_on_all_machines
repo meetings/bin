@@ -1,0 +1,16 @@
+#!/usr/bin/perl
+
+die "Must be run in bin root" unless -d "portforward";
+
+chdir "portforward";
+system "./build.pl";
+chdir "..";
+
+my @hosts = split /\s*\n\s*/, `ls portforward/build/`;
+for my $host ( @hosts ) {
+    next if $host =~ /\-a$/;
+    next unless -d "portforward/build/$host";
+
+    print STDERR "$host : " . join( " ", @ARGV ) . "\n";
+    system ssh => $host => @ARGV;
+}

@@ -1,0 +1,20 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use Cwd;
+
+my ( $srcdir ) = Cwd::abs_path($0) =~ /(.*utils)/;
+
+my $dir = '';
+my $date = `$srcdir/output_utc_date_in_touch_format`;
+
+Getopt::Long::GetOptions(
+    "dir=s" => \$dir,
+    "date=s" => \$date,
+);
+
+chdir( $dir ) if $dir;
+die "No dir found: $dir" unless ! $dir || -d $dir;
+
+`find . | TZ=GMT0 xargs -n1 touch -mt $date`;
+

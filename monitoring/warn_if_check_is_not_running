@@ -1,0 +1,5 @@
+#!/usr/bin/env perl
+
+my $output = `ps aux`;
+
+warn "$output\n" unless $output =~ m#/check\b#;

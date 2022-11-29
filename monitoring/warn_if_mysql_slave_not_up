@@ -1,0 +1,5 @@
+#!/usr/bin/env perl
+
+my $output = `mysql -e 'show slave status\\G'`;
+
+warn "$output\n" unless $output =~ m#Slave_IO_Running: Yes# and $output =~ m#Slave_SQL_Running: Yes#;

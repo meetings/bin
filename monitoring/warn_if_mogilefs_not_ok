@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+
+my $output = `/usr/local/bin/mogadm --trackers=127.0.0.2:7001,127.0.0.3:7001 check`;
+
+warn "$output\n" if
+	index( $output, "127.0.0.2:7001 ... OK" ) < 0 ||
+	index( $output, "127.0.0.3:7001 ... OK" ) < 0 ||
+	index( $output, "mogstorage ... OK" ) < 0 ||
+	index( $output, "mogstorage2 ... OK" ) < 0;

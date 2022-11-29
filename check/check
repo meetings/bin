@@ -1,0 +1,344 @@
+#!/usr/bin/env perl
+
+# PODNAME: check
+# ABSTRACT: check stuff
+
+use 5.010;
+use utf8::all;
+use warnings;
+use strict;
+
+use DateTime;
+use DateTime::Format::RFC3501;
+
+use Time::HiRes qw/time/;
+
+use Try::Tiny;
+
+use AnyEvent;
+use AnyEvent::HTTP;
+
+use Mail::IMAPClient;
+
+use Email::Sender::Simple qw/sendmail/;
+use Email::Sender::Transport::SMTP::Persistent;
+use Courriel::Builder     qw/build_email subject from to plain_body/;
+
+use URI::FromHash         qw/uri/;
+use JSON                  qw/encode_json/;
+
+use HTTP::Response;
+
+use SMS::Send::SMSGlobal::HTTP;
+
+use URI::Encode;
+
+use Net::Domain qw/hostname/;
+
+use Data::Dump qw/dump/;
+
+use Log::Any::App '$log',
+    -level  => 'debug',
+    -screen => { pattern => '[%d %M] %m%n' },
+    -file   => { path => "$ENV{HOME}/check.log", pattern_style => "daemon" };
+
+# Main {{{
+
+my %timers;
+
+$log->info('starting up');
+
+init_email();
+init_sites();
+
+$log->info('entering main loop');
+
+AE::cv->recv; # Start main loop
+
+# }}}
+
+# Checkers {{{
+
+# Sites {{{
+
+my %urls;
+my %site_status;
+my @delays;
+my @timeouts;
+
+sub init_sites {
+    %urls = (
+        ssl => 'https://api.meetin.gs/v1',
+        api => 'http://api.meetin.gs/v1/heartbeat',
+        dcp => 'http://meetin.gs/meetings/wizard',
+        cache => 'http://meetin.gs/css/dicole_reset/style.css',
+        files => 'http://meetin.gs/networking_raw/image/0/12731/50/50',
+        blog1 => 'http://www.meetin.gs/',
+        events => uri(
+            scheme => "http",
+            host   => "event-server.dicole.net",
+            path   => "/open",
+            query  => { params => JSON::encode_json({ token => 'anonymous' }) }
+        )
+    );
+
+    @delays = (1, 10, 60);
+    @timeouts = (2, 5, 10, 10 x 10);
+
+    for my $name (keys %urls) {
+        my $url = $urls{ $name };
+        $log->debug("scheduling $name -> $url");
+        $timers{sites}{$url} = AE::timer 1, 0, sub { check_site($name, $url) }
+    }
+
+    $timers{pusher}{geckoboard} = AE::timer 10, 0, sub { push_board() }
+}
+
+sub check_site {
+    my ($name, $url) = @_;
+
+    my $status = $site_status{$url};
+    my $timeout = $timeouts[$site_status{$url}{tries} // 0];
+    my $start_time = time;
+
+    $log->debug("checking $name (start_time = $start_time)");
+
+    http_get $url, timeout => 30, sub {
+        check_http_response($name, $url, $start_time, @_)
+    };
+}
+
+sub check_http_response {
+    my ($name, $original_url, $start_time, $body, $headers) = @_;
+
+    my $now = time;
+    my $elapsed = $now - $start_time;
+
+    my $elapsed_formatted = sprintf("%.3f", $elapsed);
+
+    my $headers_as_string = dump($headers);
+
+    my $response = http_response($headers, $body);
+
+    my $url = $response->header('URL') // $original_url;
+
+    $site_status{$original_url}{tries}      //= 0;
+    $site_status{$original_url}{slow_tries} //= 0;
+    $site_status{$original_url}{timeout}    //= 1;
+
+    if ($elapsed < 3 and $response->code =~ /^200$/) {
+        $site_status{$original_url}{last_status} = time;
+
+        $log->info($name . " ($elapsed_formatted seconds): " . $response->status_line);
+
+        if ($site_status{$original_url}{tries}) {
+            send_email("$name is up", "$name was down $site_status{$original_url}{tries} times");
+            $site_status{$original_url}{tries} = $site_status{$original_url}{timeout} = 0;
+        }
+
+        $site_status{$original_url}{slow_tries} = 0;
+
+        $timers{sites}{$original_url} = AE::timer 60, 0, sub { check_site($name, $original_url) };
+    } else {
+        if ($response->code !~ /^2/) {
+            $site_status{$original_url}{tries}++;
+            $site_status{$original_url}{last_status} = 1;
+        } else {
+            $site_status{$original_url}{slow_tries}++;
+            $site_status{$original_url}{last_status} = 0;
+        }
+
+        $log->error($name . " " . $response->status_line);
+
+        my $email_body = build_email_body($original_url, $response, $headers_as_string, $elapsed_formatted);
+
+        if ($site_status{$original_url}{tries} > 1) {
+            send_email("$name is down: " . $response->status_line, $email_body);
+        }
+        elsif ($site_status{$original_url}{slow_tries} > 1) {
+            send_email("$name is slow: $elapsed_formatted", $email_body);
+        }
+
+        if ($site_status{$original_url}{tries} >= 3) {
+            send_sms("$name is down (tried $site_status{$original_url}{tries} times)");
+
+            $timers{sites}{$original_url} = AE::timer 60, 0, sub { check_site($name, $original_url) };
+        } else {
+            $site_status{$original_url}{timeout} = $timeouts[$site_status{$original_url}{tries}];
+
+            $timers{sites}{$original_url} = AE::timer $delays[$site_status{$original_url}{tries}], 0,
+                sub { check_site($name, $original_url) };
+        }
+    }
+}
+
+sub build_email_body {
+    my ($original_url, $http_response, $headers_as_string, $elapsed) = @_;
+
+    my $actual_url = $http_response->header('URL');
+
+    my $content = $http_response->decoded_content;
+
+    $content = "No response content" unless length $content;
+
+    return "\
+Original URL: $original_url
+Actual URL:   $actual_url
+Elapsed:      $elapsed
+
+Headers
+========
+$headers_as_string
+
+Response content
+================
+$content";
+}
+
+sub hoh_to_pairs {
+    my ($hoh) = @_;
+}
+
+sub http_response {
+    my ($headers, $body) = @_;
+
+    my $code    = $headers->{Status};
+    my $message = $headers->{Reason};
+
+    return HTTP::Response->new($code, $message, [%$headers], $body);
+}
+
+# }}}
+
+# Reporters {{{
+
+# Send email {{{
+
+my $transport;
+
+sub init_email {
+    $transport = Email::Sender::Transport::SMTP->new({
+        host => "smtp.gmail.com",
+        ssl => 1,
+        sasl_username => 'x',
+        sasl_password => 'x',
+    });
+}
+
+sub send_email {
+    my ($subject, $body) = @_;
+
+    $log->debug("sending $subject");
+
+    my $recipients = 'jussi@dicole.com, tuomas@dicole.com, antti@dicole.com';
+
+    my $hostname = hostname;
+
+    my $email = build_email(
+        subject("[$hostname] $subject"),
+        from('check@dicole.com'),
+        to($recipients),
+        plain_body($body)
+    );
+
+    try {
+        sendmail($email, { transport => $transport });
+        $log->info("sent email to $recipients");
+    } catch {
+        $log->error("failed to send email: $_");
+    };
+}
+
+# }}}
+
+# Send SMS {{{
+
+sub send_sms {
+    my ($text) = @_;
+
+    $log->info("sending $text");
+
+    my $from = '+x';
+    for my $num (qw/+x/) {
+
+        my @cmd_lines = (
+            "curl -s -X POST 'https://api.twilio.com/2010-04-01/Accounts/x/SMS/Messages.json'",
+            "-d 'From=".URI::Encode::uri_encode($from, { encode_reserved => 1 })."'",
+            "-d 'To=".URI::Encode::uri_encode($num, { encode_reserved => 1 })."'",
+            "-d 'Body=".URI::Encode::uri_encode($text, { encode_reserved => 1 })."'",
+            "-u x",
+        );
+
+        my $cmd = join " ", @cmd_lines;
+        print $cmd . "\n";
+        print `$cmd 2>&1` . "\n";
+    }
+}
+
+# }}}
+
+# Push status to Geckoboard {{{
+
+sub push_board {
+    my @up;
+    my @slow;
+    my @down;
+
+    for my $url (keys %site_status) {
+        my $stamp = int $site_status{$url}{last_status};
+
+        if ($stamp == 0) {
+            push @slow, resolv_id($url);
+        }
+        elsif ($stamp+100 < time) {
+            push @down, resolv_id($url);
+        }
+        else {
+            push @up, resolv_id($url);
+        }
+    }
+
+    my $data = {
+        api_key => 'x',
+        data    => {
+            item => [
+                { value => get_value(\@down), text => get_text(\@down, "DOWN") },
+                { value => get_value(\@slow), text => get_text(\@slow, "SLOW") },
+                { value => get_value(\@up),   text => "UP" }
+            ]
+        }
+    };
+
+    system curl =>
+        -s => -o => '/dev/null' =>
+        -X => POST =>
+        -H => "Content-Type: application/json" =>
+        -d => JSON::encode_json($data) =>
+        'https://push.geckoboard.com/v1/send/x';
+
+    $timers{pusher}{geckoboard} = AE::timer 30, 0, sub { push_board() }
+}
+
+sub resolv_id($) {
+    my ($url) = @_;
+    for my $id (keys %urls) {
+        return $id if $urls{$id} eq $url;
+    }
+    return "";
+}
+
+sub get_value($) {
+    my ($list) = @_;
+    return "" unless @$list;
+    return int scalar @$list;
+}
+
+sub get_text($$) {
+    my ($list, $prefix) = @_;
+    return "" unless @$list;
+    return "$prefix: @$list";
+}
+
+# }}}
+
+# }}}

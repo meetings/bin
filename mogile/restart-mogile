@@ -1,0 +1,4 @@
+killall mogilefsd
+killall mogstored
+sudo -u mogile mogstored --daemon
+sudo -u mogile mogilefsd -c /etc/mogilefs/mogilefsd.conf --daemon

@@ -1,0 +1,8 @@
+#!/bin/bash
+input_volume=$1
+volume_name=`basename "$input_volume"`
+snapshot_name=`basename $input_volume`-backup-snap
+snapshot_path=`dirname $input_volume`/$snapshot_name
+
+lvremove --quiet -f "$snapshot_path" >/dev/null
+

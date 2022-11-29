@@ -1,0 +1,8 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use FindBin qw/$Bin/;
+
+exec "$Bin/list_dependencies_for_perl_script @ARGV | cpanm";

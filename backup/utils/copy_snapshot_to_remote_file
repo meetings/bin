@@ -1,0 +1,19 @@
+#!/bin/bash
+input_volume=$1
+remote_host=$2
+remote_full_backup_directory=$3
+date=$4
+
+volume_name=`basename "$input_volume"`
+
+snapshot_name=`basename $input_volume`-backup-snap
+snapshot_path=`dirname $input_volume`/$snapshot_name
+remote_vm_directory=$remote_full_backup_directory/$volume_name
+backup_name=$volume_name-snap-$date
+timestamped_full_backup_file=$remote_vm_directory/$backup_name
+timestamped_full_backup_file_temp=$timestamped_full_backup_file.part
+
+ssh $remote_host "mkdir -p '$remote_vm_directory'" &&
+ssh -C -c arcfour $remote_host "cat > '$timestamped_full_backup_file_temp' && \
+	 mv '$timestamped_full_backup_file_temp' '$timestamped_full_backup_file'" < "$snapshot_path"
+

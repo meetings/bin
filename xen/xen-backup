@@ -1,0 +1,118 @@
+#!/bin/bash
+
+usage="Usage: $0 -v volume_group -h host -d directory xen_host [xen_host ...]"
+
+exclusions="--exclude /tmp --exclude /proc --exclude /sys --exclude /lost+found --exclude /mnt --exclude /media --exclude /dev"
+
+while getopts nh:d:v: option
+do
+    case $option in
+        h) target_host=$OPTARG  ;;
+        d) target_dir=$OPTARG   ;;
+        v) vg=$OPTARG           ;;
+        *) echo $usage; exit    ;;
+    esac
+done
+
+shift `expr $OPTIND - 1`
+
+target=$target_host:$target_dir
+hosts=$*
+
+if test -z "$target_host" -o -z "$target_dir" -o -z "$vg" -o -z "$hosts"
+then
+    echo $usage
+    exit
+fi
+
+cleanup() {
+    if test -d $snapshot_mnt
+    then
+        umount $snapshot_mnt
+        rmdir $snapshot_mnt
+    fi
+    lvremove -f $snapshot
+}
+
+handle_error() {
+    cleanup
+    exit 1
+}
+
+echo Target: $target
+echo Hosts: $hosts
+echo
+
+trap handle_error KILL QUIT INT TERM ERR
+
+for host in $hosts
+do
+    snapshot=$vg/$host-snapshot
+    size=`lvs -o size --noheadings $vg/$host-disk`
+    dev=/dev/$vg/$host-disk
+    sdev=/dev/$snapshot
+    snapshot_mnt=`mktemp -d`
+    target_path=$target_dir/$host
+
+    rsync_target_dir=$target_dir/rsync/$host
+    rsync_target=$target_host:$target_dir/rsync/$host/
+
+    blocks=`     dumpe2fs -h $dev 2>/dev/null | grep 'Block count' | awk -F: '{print $2}'`
+    free_blocks=`dumpe2fs -h $dev 2>/dev/null | grep 'Free blocks' | awk -F: '{print $2}'`
+    block_size=` dumpe2fs -h $dev 2>/dev/null | grep 'Block size'  | awk -F: '{print $2}'`
+
+    transfer_size=`expr $block_size \* '(' $blocks - $free_blocks ')'`
+
+    echo "Backing up $host (`expr $transfer_size / 1024 / 1024` MB)"
+
+    set -x
+
+    lvcreate --snapshot --size 2G --name $snapshot $dev
+
+    mount $sdev $snapshot_mnt
+
+    ssh $target_host "mkdir -p $target_dir/rsync 2>&1 >/dev/null"
+
+    daily_timestamp=`date   +%F-%H-%M`
+    weekly_timestamp=`date  +%Y-%W`
+    monthly_timestamp=`date +%Y-%m`
+
+    conf_file=$target_dir/$host.$daily_timestamp.cfg
+
+    scp /etc/xen/$host.cfg $target_host:$conf_file
+
+    time rsync --delete -azq $exclusions $snapshot_mnt/ $rsync_target
+
+    cleanup
+
+    ext3_image=$target_path.$daily_timestamp.daily.ext3
+
+    zipped=$target_path.$daily_timestamp.daily.tar.gz
+    weekly_zip=$target_path.$weekly_timestamp.weekly.tar.gz
+    monthly_zip=$target_path.$monthly_timestamp.monthly.tar.gz
+
+    time ssh $target_host \
+       "img_mount=\`mktemp -d\`                                                                        && \\
+        ext3_image_mbs=\`du -sB 1M $rsync_target_dir | awk '{print \$1+1024}'\`                        && \\
+        ionice -c3 dd bs=1M                                                                               \\
+            count=\$ext3_image_mbs                                                                        \\
+            if=/dev/zero of=$ext3_image 2>/dev/null                                                    && \\
+        mkfs.ext3 -Fq $ext3_image                                                                      && \\
+        mount $ext3_image \$img_mount -o loop -t ext3                                                  && \\
+        (cd $target_dir/rsync/$host/ && cp -a * \$img_mount/)                                          && \\
+        mkdir \$img_mount/{tmp,proc,sys,mnt,media,dev}                                                 && \\
+        chmod a+rwxt \$img_mount/tmp                                                                   && \\
+        umount \$img_mount                                                                             && \\
+        rmdir \$img_mount                                                                              && \\
+        tar -czf $zipped $ext3_image $conf_file                                                        && \\
+        rm $ext3_image $conf_file                                                                      && \\
+        ([ -e $weekly_zip ]  || ln $zipped $weekly_zip )                                               && \\
+        ([ -e $monthly_zip ] || ln $zipped $monthly_zip)                                               && \\
+        find $target_dir -maxdepth 1 -mtime +4  -type f -name '*.daily.tar.gz'  -exec rm '{}' ';'      && \\
+        find $target_dir -maxdepth 1 -mtime +29 -type f -name '*.weekly.tar.gz' -exec rm '{}' ';'       ; \\
+        ln -f $zipped $target_path.latest.daily.tar.gz"
+
+    set +x
+
+    echo
+done

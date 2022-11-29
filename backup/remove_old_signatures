@@ -1,0 +1,17 @@
+#!/bin/sh
+
+signature_dir=$1
+shift 1
+files=$*
+
+[ $DEBUG ] && set -x
+
+for file in $files; do
+    name=`basename "$file"`
+
+    old_signatures=`ls -rc $signature_dir/$name/*.sig | head -n -1`
+
+    if [ "x$old_signatures" != "x" ]; then
+        rm -f "$old_signatures"
+    fi
+done

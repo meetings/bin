@@ -1,0 +1,13 @@
+#!/usr/bin/perl -n
+
+BEGIN { 
+    @ARGV = glob "/etc/xen/*" unless @ARGV;
+    our $hostname = `hostname`;
+    chomp $hostname;
+}
+
+use 5.010;
+
+push @{$macs{$1}}, $ARGV if /mac=(.+?)['\'',]/; 
+
+END { @{$macs{$_}} > 1 and say "$hostname: Duplicate MAC $_ on machines " . join(", ", @{$macs{$_}}) for keys %macs }

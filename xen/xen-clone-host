@@ -1,0 +1,143 @@
+#!/usr/bin/env perl
+
+use 5.010;
+use warnings;
+use strict;
+use utf8::all;
+use File::Slurp;
+use File::Temp qw/tempdir/;
+
+use subs qw/execute run/;
+
+our $DEBUG = 0;
+
+@ARGV == 4 or die "Usage: $0 <volume group> <from> <to> <ip>\n";
+
+my ($vg, $source_name, $target_name, $new_ip) = @ARGV;
+
+copy_images();
+update_disk_image();
+copy_configuration();
+
+sub copy_images {
+    create_target_images();
+    copy_image_data();
+    cleanup();
+}
+
+sub update_disk_image {
+    my $image = "/dev/$vg/$target_name-disk";
+    my $mountpoint = tempdir;
+
+    execute mount => $image => $mountpoint;
+
+    chdir $mountpoint;
+
+    say "[update hostname]";
+    write_file "$mountpoint/etc/hostname", $target_name
+        unless $DEBUG;
+
+    my $net_config_file = "$mountpoint/etc/network/interfaces";
+
+    say "[update network config]";
+
+    unless ($DEBUG) {
+        my $network_config = read_file($net_config_file);
+
+        my $old_ip = get_old_ip_from_xen_config();
+
+        $network_config =~ s/address $old_ip/address $new_ip/;
+
+        write_file $net_config_file, $network_config;
+    }
+
+    say "[update hosts file]";
+
+    unless ($DEBUG) {
+        my $hosts_file = "$mountpoint/etc/hosts";
+        my $hosts = read_file $hosts_file;
+        $hosts =~ s/$source_name/$target_name/g;
+        write_file $hosts_file, $hosts;
+    }
+
+    execute umount => '-l', $mountpoint;
+}
+
+sub get_old_ip_from_xen_config {
+    my $config = read_file("/etc/xen/$source_name.cfg");
+
+    my ($old_ip) = $config =~ /ip=([0-9.]+)/;
+
+    return $old_ip;
+}
+
+sub create_target_images {
+    execute lvcreate => '--size', get_source_image_size($_), '--name', "$target_name-$_", $vg
+        for qw/disk swap/;
+}
+
+sub get_source_image_size {
+    my $name = shift;
+
+    run lvs => qw/--units b --noheadings -o size/, "$vg/$source_name-$name";
+}
+
+sub copy_image_data {
+    my $snapshot_path = create_snapshot_of_source();
+    execute dd => "bs=2M", "if=$snapshot_path", "of=/dev/$vg/$target_name-disk";
+}
+
+sub create_snapshot_of_source {
+    execute lvcreate => '--snapshot', '--size', '2G', '--name',
+        "$source_name-disk-snapshot",
+        "$vg/$source_name-disk";
+
+    "/dev/$vg/$source_name-disk-snapshot"
+}
+
+sub copy_configuration {
+    my $source_config = "/etc/xen/$source_name.cfg";
+    my $target_config = "/etc/xen/$target_name.cfg";
+
+    say "[update xen config]";
+
+    unless ($DEBUG) {
+        my $config = read_file $source_config;
+
+        # Change disk and host name
+        $config =~ s/$source_name/$target_name/g;
+
+        # Change MAC
+        my $mac = generate_mac();
+
+        $config =~ s/mac=([0-9A-F:]+)/mac=$mac/;
+
+        # Change IP
+        $config =~ s/ip=([0-9.]+)/ip=$new_ip/;
+
+        write_file $target_config, $config;
+    }
+}
+
+sub generate_mac {
+    join ":", map { sprintf "%x", rand int 256 } 1..6;
+}
+
+sub cleanup {
+    execute lvremove => '-f', "$vg/$source_name-disk-snapshot";
+}
+
+sub execute {
+    my @cmd = @_;
+
+    say "[run] @cmd";
+    run @cmd unless $DEBUG;
+}
+
+sub run {
+    my $ret = `@_`;
+    die "$?\n" if $?;
+    chomp $ret;
+    $ret =~ s/^\s+//;
+    $ret
+}

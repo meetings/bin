@@ -1,0 +1,30 @@
+#!/usr/bin/perl
+
+use 5.010;
+
+use warnings;
+use strict;
+
+use Cache::Memcached;
+
+my $cache = Cache::Memcached->new({
+    servers => [ 'localhost:11211' ]
+});
+
+my $command = shift;
+
+my %commands = (
+    delete => sub {
+        my $key = shift;
+
+        my $deleted = $cache->delete($key);
+
+        say $deleted ? "Deleted $key" : "$key not found";
+    }
+);
+
+if (exists $commands{$command}) {
+    $commands{$command}->(@ARGV);
+} else {
+    die "Unknown command $command."
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/env perl
+
+use warnings;
+use strict;
+use File::Slurp;
+
+my $target = '/root/.ssh/config';
+
+my $github = read_file('/root/.ssh/github_deploy_config');
+my $user_config = read_file($target);
+
+if ($user_config =~ s/(?<=AUTOGEN_GIT_DEPLOY_START)(.*)(?=AUTOGEN_GIT_DEPLOY_END)/$github/s) {
+    write_file($target, $user_config);
+} else {
+    write_file($target, $user_config, "# AUTOGEN_GIT_DEPLOY_START\n", $github, "# AUTOGEN_GIT_DEPLOY_END\n");
+}

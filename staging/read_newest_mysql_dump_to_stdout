@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# This is meant to be used with 'fetch_remote_mysql_dump_and_write_local'
+# script. The newest database dump is read to stdout.
+
+cd /mnt/backups/mysql || exit 1
+
+cat $(ls -1t *.db.gz | head -n1)

@@ -1,0 +1,14 @@
+#!/bin/bash
+input_volume=$1
+remote_host=$2
+remote_full_backup_directory=$3
+date=$4
+
+volume_name=`basename "$input_volume"`
+
+backup_name=$volume_name-snap-$date
+remote_vm_directory=$remote_full_backup_directory/$volume_name
+timestamped_full_backup_file=$remote_vm_directory/$backup_name
+
+ssh $remote_host "gzip '$timestamped_full_backup_file'"
+
